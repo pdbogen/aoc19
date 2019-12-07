@@ -63,20 +63,15 @@ func runTry(program []int, seq []int) (int, error) {
 					result <- <-inputs[0]
 				}
 			}()
-		} else if i < len(seq)-1 {
-			go func(i int) {
-				if _, err := intcode.Execute(program, inputs[i], inputs[i+1]); err != nil {
-					errCh <- err
-				}
-			}(i)
 		} else {
 			go func(i int) {
-				if _, err := intcode.Execute(program, inputs[i], inputs[0]); err != nil {
+				if _, err := intcode.Execute(program, inputs[i], inputs[(i+1)%len(seq)]); err != nil {
 					errCh <- err
 				}
 			}(i)
 		}
 	}
+
 	select {
 	case yield := <-result:
 		log.Printf("yielded %d", yield)
