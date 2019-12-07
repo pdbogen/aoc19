@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"github.com/pdbogen/aoc19/intcode"
 	"log"
 	"os"
@@ -39,7 +40,12 @@ func try(program []int, seq []int, rem []int) (best []int, result int, err error
 }
 
 func runTry(program []int, seq []int) (int, error) {
+	if len(seq) < 2 {
+		return -1, errors.New("cannot create feedback loop without at least two amplifiers")
+	}
+
 	log.Printf("trying %v", seq)
+	errCh := make(chan error)
 	result := make(chan int)
 	var inputs []chan int
 	for _, phase := range seq {
@@ -51,18 +57,33 @@ func runTry(program []int, seq []int) (int, error) {
 		if i == 0 {
 			inputs[i] <- 0
 			go func() {
-				intcode.Execute(program, inputs[0], inputs[1])
-				result <- <-inputs[0]
+				if _, err := intcode.Execute(program, inputs[0], inputs[1]); err != nil {
+					errCh <- err
+				} else {
+					result <- <-inputs[0]
+				}
 			}()
 		} else if i < len(seq)-1 {
-			go intcode.Execute(program, inputs[i], inputs[i+1])
+			go func(i int) {
+				if _, err := intcode.Execute(program, inputs[i], inputs[i+1]); err != nil {
+					errCh <- err
+				}
+			}(i)
 		} else {
-			go intcode.Execute(program, inputs[i], inputs[0])
+			go func(i int) {
+				if _, err := intcode.Execute(program, inputs[i], inputs[0]); err != nil {
+					errCh <- err
+				}
+			}(i)
 		}
 	}
-	yield := <-result
-	log.Printf("yielded %d", yield)
-	return yield, nil
+	select {
+	case yield := <-result:
+		log.Printf("yielded %d", yield)
+		return yield, nil
+	case err := <-errCh:
+		return -1, err
+	}
 }
 
 func main() {

@@ -19,6 +19,7 @@ func TestTry(t *testing.T) {
 	}{
 		{"example a", exampleA, []int{9, 8, 7, 6, 5}, 139629729, false},
 		{"example b", exampleB, []int{9, 7, 8, 5, 6}, 18216, false},
+		{"err example", []int{55}, []int{}, -1, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -44,6 +45,9 @@ func Test_runTry(t *testing.T) {
 	}{
 		{"example a", exampleA, []int{9, 8, 7, 6, 5}, 139629729, false},
 		{"example b", exampleB, []int{9, 7, 8, 5, 6}, 18216, false},
+		{"err example1", exampleA, []int{}, -1, true},
+		{"err example2", exampleA, []int{1}, -1, true},
+		{"err example3", []int{55}, []int{1, 2}, -1, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
