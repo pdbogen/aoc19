@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/pdbogen/aoc19/intcode"
 	"log"
 	"os"
@@ -41,16 +40,29 @@ func try(program []int, seq []int, rem []int) (best []int, result int, err error
 
 func runTry(program []int, seq []int) (int, error) {
 	log.Printf("trying %v", seq)
-	accum := 0
+	result := make(chan int)
+	var inputs []chan int
 	for _, phase := range seq {
-		// this is very fragile, but we know it only outputs 1 value...
-		outputCh := make(chan int, 1)
-		if _, err := intcode.Execute(program, intcode.Provider([]int{phase, accum}), outputCh); err != nil {
-			return -1, fmt.Errorf("during execution of seq %v: %v", seq, err)
-		}
-		accum = <-outputCh
+		inCh := make(chan int, 2)
+		inCh <- phase
+		inputs = append(inputs, inCh)
 	}
-	return accum, nil
+	for i := range seq {
+		if i == 0 {
+			inputs[i] <- 0
+			go func() {
+				intcode.Execute(program, inputs[0], inputs[1])
+				result <- <-inputs[0]
+			}()
+		} else if i < len(seq)-1 {
+			go intcode.Execute(program, inputs[i], inputs[i+1])
+		} else {
+			go intcode.Execute(program, inputs[i], inputs[0])
+		}
+	}
+	yield := <-result
+	log.Printf("yielded %d", yield)
+	return yield, nil
 }
 
 func main() {
@@ -63,7 +75,7 @@ func main() {
 		log.Fatalf("loading program: %v", err)
 	}
 
-	bestSeq, value, err := try(prog, []int{}, []int{0, 1, 2, 3, 4})
+	bestSeq, value, err := try(prog, []int{}, []int{5, 6, 7, 8, 9})
 	if err != nil {
 		log.Fatalf("executing program: %v", err)
 	}

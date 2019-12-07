@@ -1,7 +1,6 @@
 package intcode
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	. "github.com/pdbogen/aoc19/intcode/opcodes"
@@ -86,7 +85,7 @@ func Compare(in []int, ptr int, comparison func(i, j int) bool) (out []int, outP
 	return out, ptr + 4, nil
 }
 
-func Input(in []int, ptr int, rdr *bufio.Reader) (out []int, outPtr int, err error) {
+func Input(in []int, ptr int, inChan <-chan int) (out []int, outPtr int, err error) {
 	if ptr+1 >= len(in) {
 		return nil, 0, fmt.Errorf("program pointer %d out of range", ptr)
 	}
@@ -94,16 +93,7 @@ func Input(in []int, ptr int, rdr *bufio.Reader) (out []int, outPtr int, err err
 		return nil, 0, fmt.Errorf("opcode %d at ptr %d is not %d", in[ptr], ptr, OpInput)
 	}
 
-	input, err := rdr.ReadString('\n')
-	if err != nil {
-		return nil, 0, fmt.Errorf("scanning input failed: %v", err)
-	}
-	input = strings.TrimSpace(input)
-
-	inputInt, err := strconv.Atoi(input)
-	if err != nil {
-		return nil, 0, fmt.Errorf("token %q could not be converted to integer: %v", input, err)
-	}
+	inputInt := <-inChan
 
 	dest := in[ptr+1]
 	outPtr = ptr + 2
@@ -120,7 +110,7 @@ func Input(in []int, ptr int, rdr *bufio.Reader) (out []int, outPtr int, err err
 	return out, outPtr, nil
 }
 
-func Output(in []int, ptr int, output io.Writer) (out []int, outPtr int, err error) {
+func Output(in []int, ptr int, outChan chan<- int) (out []int, outPtr int, err error) {
 	op, err := ReadOp(in, ptr, 1)
 	if err != nil {
 		return nil, 0, err
@@ -129,19 +119,12 @@ func Output(in []int, ptr int, output io.Writer) (out []int, outPtr int, err err
 		return nil, 0, fmt.Errorf("read op code %d is not %d", op.Code, OpOutput)
 	}
 
-	outPtr = ptr + 2
-	var targetIdx int
-	if op.Modes[0] == ModePosition {
-		targetIdx = op.Args[0]
-	} else if op.Modes[0] == ModeImmediate {
-		targetIdx = ptr + 1
+	if op.Args[0] >= len(in) {
+		return nil, 0, fmt.Errorf("output target %d out of range (chain length %d)", op.BakedArgs[0], len(in))
 	}
-	if targetIdx >= len(in) {
-		return nil, 0, fmt.Errorf("output target %d out of range (chain length %d)", targetIdx, len(in))
-	}
-	if _, err := fmt.Fprintf(output, "%d\n", in[targetIdx]); err != nil {
-		return nil, 0, fmt.Errorf("error writing target: %v", err)
-	}
+
+	outChan <- op.BakedArgs[0]
+
 	return in, ptr + 2, nil
 }
 
@@ -200,7 +183,8 @@ func binOp(opCode int, op func(int, int) int) func(in []int, ptr int) (out []int
 	}
 }
 
-func Execute(in []int, input *bufio.Reader, output io.Writer) (out []int, err error) {
+func Execute(in []int, input <-chan int, output chan<- int) (out []int, err error) {
+	defer close(output)
 	ptr := 0
 	prog := in
 execution:
@@ -239,6 +223,14 @@ execution:
 	return prog, nil
 }
 
+func MustLoadString(in string) []int {
+	out, err := LoadString(in)
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
+
 func LoadString(in string) (out []int, err error) {
 	return Load(bytes.NewBufferString(in))
 }
@@ -271,4 +263,15 @@ func Load(in io.Reader) (out []int, err error) {
 	}
 
 	return chainInt, nil
+}
+
+func Provider(values []int) (<-chan int) {
+	ret := make(chan int)
+	go func(ch chan<- int, values []int) {
+		defer close(ret)
+		for _, v := range values {
+			ret <- v
+		}
+	}(ret, values)
+	return ret
 }
