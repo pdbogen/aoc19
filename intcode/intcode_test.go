@@ -28,7 +28,7 @@ func TestAdd(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("add test #%d", i), func(t *testing.T) {
 			c := intcode.Computer{Program: test.input}
-			actual, actualPtr, actualErr := c.MathOperation(OpAdd, 0, func(a int, b int) int { return a + b })
+			actual, actualPtr, actualErr := c.BinaryMath(OpAdd, 0, func(a int, b int) int { return a + b })
 			if test.err {
 				assert.Errorf(t, actualErr, "test %d: expected %+v to result in an error", i, test.input)
 				assert.Nilf(t, actual, "test %d: expected %+v to result in nil output", i, test.input)
@@ -60,7 +60,7 @@ func TestMul(t *testing.T) {
 		{[]int{1002, 2, 3, 3}, []int{1002, 2, 3, 9}, 4, false},
 	} {
 		c := intcode.Computer{Program: test.input}
-		actual, actualPtr, actualErr := c.MathOperation(OpMul, 0, func(a int, b int) int { return a * b })
+		actual, actualPtr, actualErr := c.BinaryMath(OpMul, 0, func(a int, b int) int { return a * b })
 		if test.err {
 			assert.Errorf(t, actualErr, "test %d: expected %+v to result in an error", i, test.input)
 			assert.Nilf(t, actual, "test %d: expected %+v to result in nil output", i, test.input)

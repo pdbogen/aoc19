@@ -6,6 +6,7 @@ import (
 	. "github.com/pdbogen/aoc19/intcode/opcodes"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -138,12 +139,16 @@ func (c Computer) Output(ptr int, outChan chan<- int) (out []int, outPtr int, er
 		return nil, 0, fmt.Errorf("read op code %d is not %d", op.Code, OpOutput)
 	}
 
-	outChan <- op.BakedArgs[0]
+	if outChan == nil {
+		log.Printf("output: %d", op.BakedArgs[0])
+	} else {
+		outChan <- op.BakedArgs[0]
+	}
 
 	return c.Program, ptr + 2, nil
 }
 
-func (c Computer) MathOperation(opCode int, ptr int, op func(int, int) int) (out []int, outPtr int, err error) {
+func (c Computer) BinaryMath(opCode int, ptr int, op func(int, int) int) (out []int, outPtr int, err error) {
 	readOp, err := c.ReadOp(ptr, 3)
 	if err != nil {
 		return nil, 0, err
@@ -193,9 +198,9 @@ execution:
 		var newProg []int
 		switch c.Program[ptr] % 100 {
 		case OpAdd:
-			newProg, newPtr, err = c.MathOperation(OpAdd, ptr, func(a int, b int) int { return a + b })
+			newProg, newPtr, err = c.BinaryMath(OpAdd, ptr, func(a int, b int) int { return a + b })
 		case OpMul:
-			newProg, newPtr, err = c.MathOperation(OpMul, ptr, func(a int, b int) int { return a * b })
+			newProg, newPtr, err = c.BinaryMath(OpMul, ptr, func(a int, b int) int { return a * b })
 		case OpInput:
 			newProg, newPtr, err = c.Input(ptr, input)
 		case OpOutput:
@@ -251,22 +256,22 @@ func Load(in io.Reader) (out []int, err error) {
 		return nil, fmt.Errorf("could not read program: %v", err)
 	}
 
-	chainStr := strings.Split(strings.TrimSpace(string(prog)), ",")
-	chainInt := make([]int, len(chainStr))
-	for i, s := range chainStr {
+	programText := strings.Split(strings.TrimSpace(string(prog)), ",")
+	program := make([]int, len(programText))
+	for i, s := range programText {
 		if s == "" {
 			continue
 		}
-		chainInt[i], err = strconv.Atoi(s)
+		program[i], err = strconv.Atoi(s)
 		if err != nil {
 			return nil, fmt.Errorf("token %d %q could not be converted to integer: %v", i, s, err)
 		}
 	}
 
-	return chainInt, nil
+	return program, nil
 }
 
-func Provider(values []int) (<-chan int) {
+func Provider(values []int) <-chan int {
 	ret := make(chan int)
 	go func(ch chan<- int, values []int) {
 		defer close(ret)
