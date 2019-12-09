@@ -11,38 +11,57 @@ import (
 	"strings"
 )
 
+type Computer struct {
+	RelativeBase int
+	Program      []int
+}
 type Op struct {
-	Code      int
-	Modes     []int
-	Args      []int
+	Code  int
+	Modes []int
+	Args  []int
+
+	// When an argument represents an address, this is the canonical address
+	Address []int
+
+	// This is the interpretation of the argument as a value
 	BakedArgs []int
 }
 
-func ReadOp(in []int, ptr int, args int) (op *Op, err error) {
-	if ptr+args >= len(in) {
+func (c *Computer) ReadOp(ptr int, args int) (op *Op, err error) {
+	if ptr+args >= len(c.Program) {
 		return nil, fmt.Errorf("expected %d arguments but not enough program left at %d", args, ptr)
 	}
 
 	ret := &Op{
-		Code:  in[ptr] % 100,
+		Code:  c.Program[ptr] % 100,
 		Modes: []int{},
 	}
 
-	flags := in[ptr] / 100
+	flags := c.Program[ptr] / 100
 	for i := 0; i < args; i++ {
-		ret.Args = append(ret.Args, in[ptr+1+i])
+		ret.Args = append(ret.Args, c.Program[ptr+1+i])
 		ret.Modes = append(ret.Modes, flags%10)
 		flags = flags / 10
 	}
 
 	ret.BakedArgs = make([]int, len(ret.Args))
+	ret.Address = make([]int, len(ret.Args))
 	for argN, arg := range ret.Args {
-		ret.BakedArgs[argN] = arg
-		if ret.Modes[argN] == ModePosition {
-			if arg < len(in) {
-				ret.BakedArgs[argN] = in[arg]
+		switch ret.Modes[argN] {
+		case ModePosition:
+			if arg < len(c.Program) {
+				ret.BakedArgs[argN] = c.Program[arg]
 			}
-		} else if ret.Modes[argN] != ModeImmediate {
+			ret.Address[argN] = arg
+		case ModeImmediate:
+			ret.BakedArgs[argN] = arg
+			ret.Address[argN] = ptr + argN + 1
+		case ModeRelative:
+			if c.RelativeBase+arg < len(c.Program) {
+				ret.BakedArgs[argN] = c.Program[c.RelativeBase+arg]
+			}
+			ret.Address[argN] = c.RelativeBase + arg
+		default:
 			return nil, fmt.Errorf("unhandled parameter mode %d", ret.Modes[argN])
 		}
 	}
@@ -50,21 +69,22 @@ func ReadOp(in []int, ptr int, args int) (op *Op, err error) {
 	return ret, nil
 }
 
-func Jump(in []int, ptr int, wantNonZero bool) (out []int, outPtr int, err error) {
-	op, err := ReadOp(in, ptr, 2)
+func (c Computer) Jump(ptr int, wantNonZero bool) (out []int, outPtr int, err error) {
+	op, err := c.ReadOp(ptr, 2)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	isNonZero := op.BakedArgs[0] != 0
 	if isNonZero == wantNonZero {
-		return in, op.BakedArgs[1], nil
+		return c.Program, op.BakedArgs[1], nil
 	}
-	return in, ptr + 3, nil
+	return c.Program, ptr + 3, nil
 }
 
-func Compare(in []int, ptr int, comparison func(i, j int) bool) (out []int, outPtr int, err error) {
-	op, err := ReadOp(in, ptr, 3)
+// A compare argument takes three arguments; two to compare, one to save the result.
+func (c Computer) Compare(ptr int, comparison func(i, j int) bool) (out []int, outPtr int, err error) {
+	op, err := c.ReadOp(ptr, 3)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -74,44 +94,43 @@ func Compare(in []int, ptr int, comparison func(i, j int) bool) (out []int, outP
 		result = 1
 	}
 
-	if op.Args[2] >= len(in) {
-		out = make([]int, op.Args[2]+1)
+	if op.Address[2] >= len(c.Program) {
+		out = make([]int, op.Address[2]+1)
 	} else {
-		out = make([]int, len(in))
+		out = make([]int, len(c.Program))
 	}
-	copy(out, in)
-	out[op.Args[2]] = result
+	copy(out, c.Program)
+	out[op.Address[2]] = result
 
 	return out, ptr + 4, nil
 }
 
-func Input(in []int, ptr int, inChan <-chan int) (out []int, outPtr int, err error) {
-	if ptr+1 >= len(in) {
-		return nil, 0, fmt.Errorf("program pointer %d out of range", ptr)
-	}
-	if in[ptr] != OpInput {
-		return nil, 0, fmt.Errorf("opcode %d at ptr %d is not %d", in[ptr], ptr, OpInput)
+// Input takes one argument, the address where we'll save the read-in value.
+func (c Computer) Input(ptr int, inChan <-chan int) (out []int, outPtr int, err error) {
+	op, err := c.ReadOp(ptr, 1)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	inputInt := <-inChan
-
-	dest := in[ptr+1]
+	dest := op.Address[0]
 	outPtr = ptr + 2
 
-	if dest+1 >= len(in) {
+	if dest+1 >= len(c.Program) {
 		out = make([]int, dest+1)
 	} else {
-		out = make([]int, len(in))
+		out = make([]int, len(c.Program))
 	}
 
-	copy(out, in)
+	copy(out, c.Program)
 	out[dest] = inputInt
 
 	return out, outPtr, nil
 }
 
-func Output(in []int, ptr int, outChan chan<- int) (out []int, outPtr int, err error) {
-	op, err := ReadOp(in, ptr, 1)
+// Output takes one argument, the value to print out.
+func (c Computer) Output(ptr int, outChan chan<- int) (out []int, outPtr int, err error) {
+	op, err := c.ReadOp(ptr, 1)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -119,108 +138,90 @@ func Output(in []int, ptr int, outChan chan<- int) (out []int, outPtr int, err e
 		return nil, 0, fmt.Errorf("read op code %d is not %d", op.Code, OpOutput)
 	}
 
-	if op.Args[0] >= len(in) {
-		return nil, 0, fmt.Errorf("output target %d out of range (chain length %d)", op.BakedArgs[0], len(in))
-	}
-
 	outChan <- op.BakedArgs[0]
 
-	return in, ptr + 2, nil
+	return c.Program, ptr + 2, nil
 }
 
-func Add(chain []int, ptr int) (resultChain []int, resultPtr int, err error) {
-	return binOp(OpAdd, func(a, b int) int { return a + b })(chain, ptr)
-}
-
-func Multiply(chain []int, ptr int) (resultChain []int, resultPtr int, err error) {
-	return binOp(OpMul, func(a, b int) int { return a * b })(chain, ptr)
-}
-
-func binOp(opCode int, op func(int, int) int) func(in []int, ptr int) (out []int, outPtr int, err error) {
-	return func(in []int, ptr int) (out []int, outPtr int, err error) {
-		readOp, err := ReadOp(in, ptr, 3)
-		if err != nil {
-			return nil, 0, err
-		}
-		if readOp.Code != opCode {
-			return nil, 0, fmt.Errorf("program pointed %d pointed to %d, not opcode %d", ptr, readOp.Code, opCode)
-		}
-
-		opAIdx := readOp.Args[0]
-		if readOp.Modes[0] == ModeImmediate {
-			opAIdx = ptr + 1
-		}
-		if opAIdx >= len(in) {
-			return nil, 0, fmt.Errorf("op A index %d out of range", opAIdx)
-		}
-		opA := in[opAIdx]
-
-		opBIdx := readOp.Args[1]
-		if readOp.Modes[1] == ModeImmediate {
-			opBIdx = ptr + 2
-		}
-		if opBIdx >= len(in) {
-			return nil, 0, fmt.Errorf("op B index %d out of range", opBIdx)
-		}
-		opB := in[opBIdx]
-
-		dest := in[ptr+3]
-		outPtr = ptr + 4
-
-		if dest+1 >= len(in) {
-			out = make([]int, dest+1)
-		} else {
-			out = make([]int, len(in))
-		}
-
-		copy(out, in)
-
-		out[dest] = op(opA, opB)
-
-		// log.Printf("wrote %d (@%d) op%d %d (@%d) = %d (@%d)", opA, opAIdx, opCode, opB, opBIdx, out[dest], dest)
-
-		return out, outPtr, nil
+func (c Computer) MathOperation(opCode int, ptr int, op func(int, int) int) (out []int, outPtr int, err error) {
+	readOp, err := c.ReadOp(ptr, 3)
+	if err != nil {
+		return nil, 0, err
 	}
+
+	if readOp.Code != opCode {
+		return nil, 0, fmt.Errorf("expected opcode %d at ptr %d but found %d", opCode, ptr, readOp.Code)
+	}
+
+	dest := readOp.Address[2]
+	outPtr = ptr + 4
+
+	if dest >= len(c.Program) {
+		out = make([]int, dest+1)
+	} else {
+		out = make([]int, len(c.Program))
+	}
+	copy(out, c.Program)
+	out[dest] = op(readOp.BakedArgs[0], readOp.BakedArgs[1])
+
+	return out, outPtr, nil
+}
+
+func (c *Computer) SetRelativeBase(ptr int) (out []int, outPtr int, err error) {
+	op, err := c.ReadOp(ptr, 1)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	c.RelativeBase += op.BakedArgs[0]
+
+	return c.Program, ptr + 2, nil
 }
 
 func Execute(in []int, input <-chan int, output chan<- int) (out []int, err error) {
-	defer close(output)
+	c := Computer{Program: in}
+
+	if output != nil {
+		defer close(output)
+	}
+
 	ptr := 0
-	prog := in
 execution:
-	for ptr < len(prog) {
+	for ptr < len(c.Program) {
 		// log.Printf("%d in %v [%d] %v", ptr, prog[:ptr], prog[ptr], prog[ptr+1:])
 		var newPtr int
 		var newProg []int
-		switch prog[ptr] % 100 {
+		switch c.Program[ptr] % 100 {
 		case OpAdd:
-			newProg, newPtr, err = Add(prog, ptr)
+			newProg, newPtr, err = c.MathOperation(OpAdd, ptr, func(a int, b int) int { return a + b })
 		case OpMul:
-			newProg, newPtr, err = Multiply(prog, ptr)
+			newProg, newPtr, err = c.MathOperation(OpMul, ptr, func(a int, b int) int { return a * b })
 		case OpInput:
-			newProg, newPtr, err = Input(prog, ptr, input)
+			newProg, newPtr, err = c.Input(ptr, input)
 		case OpOutput:
-			newProg, newPtr, err = Output(prog, ptr, output)
+			newProg, newPtr, err = c.Output(ptr, output)
 		case OpJumpTrue:
-			newProg, newPtr, err = Jump(prog, ptr, true)
+			newProg, newPtr, err = c.Jump(ptr, true)
 		case OpJumpFalse:
-			newProg, newPtr, err = Jump(prog, ptr, false)
+			newProg, newPtr, err = c.Jump(ptr, false)
 		case OpLessThan:
-			newProg, newPtr, err = Compare(prog, ptr, func(i, j int) bool { return i < j })
+			newProg, newPtr, err = c.Compare(ptr, func(i, j int) bool { return i < j })
 		case OpEquals:
-			newProg, newPtr, err = Compare(prog, ptr, func(i, j int) bool { return i == j })
+			newProg, newPtr, err = c.Compare(ptr, func(i, j int) bool { return i == j })
+		case OpSetRelativeBase:
+			newProg, newPtr, err = c.SetRelativeBase(ptr)
 		case OpEnd:
 			break execution
 		default:
-			return nil, fmt.Errorf("unrecognized opcode %d at %d", prog[ptr], ptr)
+			return nil, fmt.Errorf("unrecognized opcode %d at %d", c.Program[ptr], ptr)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("at ptr %d in %v, opcode %d resulted in error: %v", ptr, prog, prog[ptr], err)
+			return nil, fmt.Errorf("at ptr %d in %v, opcode %d resulted in error: %v", ptr, c.Program, c.Program[ptr], err)
 		}
-		prog = newProg
+		c.Program = newProg
 		ptr = newPtr
 	}
-	return prog, nil
+	return c.Program, nil
 }
 
 func MustLoadString(in string) []int {

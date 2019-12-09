@@ -1,12 +1,11 @@
 package intcode_test
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/pdbogen/aoc19/intcode"
 	. "github.com/pdbogen/aoc19/intcode/opcodes"
 	"github.com/stretchr/testify/assert"
-	"strconv"
+	"sync"
 	"testing"
 )
 
@@ -28,7 +27,8 @@ func TestAdd(t *testing.T) {
 		{[]int{1001, 2, 3, 4}, []int{1001, 2, 3, 4, 6}, 4, false},
 	} {
 		t.Run(fmt.Sprintf("add test #%d", i), func(t *testing.T) {
-			actual, actualPtr, actualErr := intcode.Add(test.input, 0)
+			c := intcode.Computer{Program: test.input}
+			actual, actualPtr, actualErr := c.MathOperation(OpAdd, 0, func(a int, b int) int { return a + b })
 			if test.err {
 				assert.Errorf(t, actualErr, "test %d: expected %+v to result in an error", i, test.input)
 				assert.Nilf(t, actual, "test %d: expected %+v to result in nil output", i, test.input)
@@ -59,7 +59,8 @@ func TestMul(t *testing.T) {
 		{[]int{1102, 2, 3, 3}, []int{1102, 2, 3, 6}, 4, false},
 		{[]int{1002, 2, 3, 3}, []int{1002, 2, 3, 9}, 4, false},
 	} {
-		actual, actualPtr, actualErr := intcode.Multiply(test.input, 0)
+		c := intcode.Computer{Program: test.input}
+		actual, actualPtr, actualErr := c.MathOperation(OpMul, 0, func(a int, b int) int { return a * b })
 		if test.err {
 			assert.Errorf(t, actualErr, "test %d: expected %+v to result in an error", i, test.input)
 			assert.Nilf(t, actual, "test %d: expected %+v to result in nil output", i, test.input)
@@ -75,57 +76,85 @@ func TestMul(t *testing.T) {
 func TestExecute(t *testing.T) {
 	type test struct {
 		program  []int
-		input    string
+		input    []int
 		expected []int
-		output   string
+		output   []int
 		err      bool
 	}
 
+	var quine = []int{
+		100 + OpSetRelativeBase, 1,
+		200 + OpOutput, -1,
+		1000 + OpAdd, 16, 1, 16,
+		1000 + OpEquals, 16, 16, 17,
+		1000 + OpJumpFalse, 17, 0,
+		OpEnd}
+
 	for i, test := range []test{
-		{[]int{98}, "", nil, "", true},
-		{[]int{99}, "", []int{99}, "", false},
-		{[]int{1, 5, 6, 7, 99, 1, 2, 0}, "", []int{1, 5, 6, 7, 99, 1, 2, 3}, "", false},
-		{[]int{1, 9, 10, 3, 2, 3, 11, 0, 99, 30, 40, 50}, "", []int{3500, 9, 10, 70, 2, 3, 11, 0, 99, 30, 40, 50}, "", false},
-		{[]int{1, 0, 0, 0, 99}, "", []int{2, 0, 0, 0, 99}, "", false},
-		{[]int{2, 3, 0, 3, 99}, "", []int{2, 3, 0, 6, 99}, "", false},
-		{[]int{2, 4, 4, 5, 99, 0}, "", []int{2, 4, 4, 5, 99, 9801}, "", false},
-		{[]int{1, 1, 1, 4, 99, 5, 6, 0, 99}, "", []int{30, 1, 1, 4, 2, 5, 6, 0, 99}, "", false},
-		{[]int{OpInput, 5, OpOutput, 5, OpEnd}, "17", []int{OpInput, 5, OpOutput, 5, 99, 17}, "17\n", false},
-		{[]int{1001, 1, 5, 3}, "", []int{1001, 1, 5, 6}, "", false},
-		{[]int{1002, 2, 5, 3}, "", []int{1002, 2, 5, 25}, "", false},
-		{[]int{1101, 100, -1, 4, 0}, "", []int{1101, 100, -1, 4, 99}, "", false},
+		{[]int{98}, nil, nil, nil, true},
+		{[]int{99}, nil, []int{99}, nil, false},
+		{[]int{1, 5, 6, 7, 99, 1, 2, 0}, nil, []int{1, 5, 6, 7, 99, 1, 2, 3}, nil, false},
+		{[]int{OpAdd, 9, 10, 3, OpMul, 3, 11, 0, OpEnd, 30, 40, 50}, nil, []int{3500, 9, 10, 70, 2, 3, 11, 0, 99, 30, 40, 50}, nil, false},
+		{[]int{1, 0, 0, 0, 99}, nil, []int{2, 0, 0, 0, 99}, nil, false},
+		{[]int{2, 3, 0, 3, 99}, nil, []int{2, 3, 0, 6, 99}, nil, false},
+		{[]int{2, 4, 4, 5, 99, 0}, nil, []int{2, 4, 4, 5, 99, 9801}, nil, false},
+		{[]int{1, 1, 1, 4, 99, 5, 6, 0, 99}, nil, []int{30, 1, 1, 4, 2, 5, 6, 0, 99}, nil, false},
+		{[]int{OpInput, 5, OpOutput, 5, OpEnd}, []int{17}, []int{OpInput, 5, OpOutput, 5, 99, 17}, []int{17}, false},
+		{[]int{1001, 1, 5, 3}, nil, []int{1001, 1, 5, 6}, nil, false},
+		{[]int{1002, 2, 5, 3}, nil, []int{1002, 2, 5, 25}, nil, false},
+		{[]int{1101, 100, -1, 4, 0}, nil, []int{1101, 100, -1, 4, 99}, nil, false},
 		{[]int{
 			1100 + OpJumpTrue, 1, 6, // 0 1 2
 			100 + OpOutput, 0, // 3 4
 			OpEnd,             // 5
 			100 + OpOutput, 1, // 6 7
-		}, "", nil, "1\n", false},
+		}, nil, nil, []int{1}, false},
 		{[]int{
 			1100 + OpJumpFalse, 1, 6, // 0 1 2
 			100 + OpOutput, 0, // 3 4
 			OpEnd,             // 5
 			100 + OpOutput, 1, // 6 7
-		}, "", nil, "0\n", false},
-		{[]int{1100 + OpLessThan, 1, 2, 5, 99}, "", []int{1100 + OpLessThan, 1, 2, 5, 99, 1}, "", false},
-		{[]int{1100 + OpLessThan, 10, 2, 5, 99}, "", []int{1100 + OpLessThan, 10, 2, 5, 99, 0}, "", false},
-		{[]int{1100 + OpLessThan, 2, 2, 5, 99}, "", []int{1100 + OpLessThan, 2, 2, 5, 99, 0}, "", false},
-		{[]int{1100 + OpEquals, 2, 2, 5, 99}, "", []int{1100 + OpEquals, 2, 2, 5, 99, 1}, "", false},
-		{[]int{1100 + OpEquals, 1, 2, 5, 99}, "", []int{1100 + OpEquals, 1, 2, 5, 99, 0}, "", false},
+		}, nil, nil, []int{0}, false},
+		{[]int{1100 + OpLessThan, 1, 2, 5, 99}, nil, []int{1100 + OpLessThan, 1, 2, 5, 99, 1}, nil, false},
+		{[]int{1100 + OpLessThan, 10, 2, 5, 99}, nil, []int{1100 + OpLessThan, 10, 2, 5, 99, 0}, nil, false},
+		{[]int{1100 + OpLessThan, 2, 2, 5, 99}, nil, []int{1100 + OpLessThan, 2, 2, 5, 99, 0}, nil, false},
+		{[]int{1100 + OpEquals, 2, 2, 5, 99}, nil, []int{1100 + OpEquals, 2, 2, 5, 99, 1}, nil, false},
+		{[]int{1100 + OpEquals, 1, 2, 5, 99}, nil, []int{1100 + OpEquals, 1, 2, 5, 99, 0}, nil, false},
+		{quine, nil, append(quine, 16, 1), quine, false},
+		{[]int{1102, 34915192, 34915192, 7, 4, 7, 99, 0}, nil, []int{1102, 34915192, 34915192, 7, 4, 7, 99, 1219070632396864}, []int{1219070632396864}, false},
+		{[]int{104, 1125899906842624, 99}, nil, nil, []int{1125899906842624}, false},
 	} {
 		if test.expected == nil {
 			test.expected = test.program
 		}
 
 		t.Run(fmt.Sprintf("execute test #%d", i), func(t *testing.T) {
-			actualOut := &bytes.Buffer{}
-			actual, actualErr := intcode.Execute(test.program, bytes.NewBufferString(test.input), actualOut)
+			input := make(chan int, len(test.input))
+			for _, i := range test.input {
+				input <- i
+			}
+
+			outCh := make(chan int)
+			var actualOut []int
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				for i := range outCh {
+					actualOut = append(actualOut, i)
+				}
+				wg.Done()
+			}()
+
+			actual, actualErr := intcode.Execute(test.program, input, outCh)
 			if test.err {
 				assert.Errorf(t, actualErr, "test %d: expected %+v to result in an error", i, test.program)
 				return
 			}
 			assert.Nilf(t, actualErr, "test %d: expected %+v to _not_ result in an error, but got %v", i, test.program, actualErr)
-			assert.Equalf(t, test.expected, actual, "test %d: output of %+v was not as expected", i, test.program)
-			assert.Equal(t, test.output, actualOut.String())
+			assert.Equalf(t, test.expected, actual, "test %d: final state of %+v was not as expected", i, test.program)
+
+			wg.Wait()
+			assert.Equal(t, test.output, actualOut, "output")
 		})
 	}
 }
@@ -133,17 +162,18 @@ func TestExecute(t *testing.T) {
 func TestInput(t *testing.T) {
 	type test struct {
 		program  []int
-		input    string
+		input    int
 		expected []int
 		err      bool
 	}
 	for i, test := range []test{
-		{[]int{3, 0}, "99", []int{99, 0}, false},
-		{[]int{3, 5, 99}, "99", []int{3, 5, 99, 0, 0, 99}, false},
-		{[]int{3, 0}, "not a number", nil, true},
+		{[]int{3, 0}, 99, []int{99, 0}, false},
+		{[]int{3, 5, 99}, 99, []int{3, 5, 99, 0, 0, 99}, false},
 	} {
 		t.Run(fmt.Sprintf("Input Test #%d", i), func(t *testing.T) {
-			actual, actualErr := intcode.Execute(test.program, bytes.NewBufferString(test.input), nil)
+			input := make(chan int, 1)
+			input <- test.input
+			actual, actualErr := intcode.Execute(test.program, input, nil)
 			if test.err {
 				assert.Error(t, actualErr)
 				return
@@ -157,23 +187,29 @@ func TestInput(t *testing.T) {
 func TestOutput(t *testing.T) {
 	type test struct {
 		program []int
-		output  string
+		output  []int
 		err     bool
 	}
 	for i, test := range []test{
-		{[]int{OpOutput, 0}, strconv.Itoa(OpOutput) + "\n", false},
-		{[]int{OpOutput, 99}, "", true},
-		{[]int{104, 17}, "17\n", false},
+		{[]int{OpOutput, 0}, []int{OpOutput}, false},
+		{[]int{OpOutput, 99}, []int{0}, false},
+		{[]int{104, 17}, []int{17}, false},
 	} {
 		t.Run(fmt.Sprintf("output test #%d", i), func(t *testing.T) {
-			output := &bytes.Buffer{}
+			output := make(chan int)
+			var outputInts []int
+			go func() {
+				for i := range output {
+					outputInts = append(outputInts, i)
+				}
+			}()
 			actual, actualErr := intcode.Execute(test.program, nil, output)
 			if test.err {
 				assert.Error(t, actualErr)
 				return
 			}
 			assert.Nil(t, actualErr)
-			assert.Equal(t, test.output, output.String())
+			assert.Equal(t, test.output, outputInts)
 			assert.Equal(t, test.program, actual)
 		})
 	}
@@ -198,7 +234,8 @@ func TestReadOp(t *testing.T) {
 		{[]int{12301, 0, 0, 0}, 0, []int{0, 0, 0}, nil, nil, true},
 	} {
 		t.Run(fmt.Sprintf("read op test #%d", i), func(t *testing.T) {
-			op, err := intcode.ReadOp(test.program, 0, len(test.args))
+			c := intcode.Computer{Program: test.program}
+			op, err := c.ReadOp(0, len(test.args))
 			if test.err {
 				assert.Error(t, err)
 				return
