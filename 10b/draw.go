@@ -30,6 +30,15 @@ func Draw(center Point, bounds Point, points map[Point][]Point, target Point) *i
 		}
 	}
 
-	draw2.Line(ret, image.Pt(center.X*mul+5, center.Y*mul+5), image.Pt(target.X*mul+5, target.Y*mul+5), red)
+	draw2.Line(ret, image.Pt(center.X*mul+mul/2, center.Y*mul+mul/2), image.Pt(target.X*mul+mul/2, target.Y*mul+mul/2), red)
+	for _, pt := range []Point{center, target} {
+		draw.Draw(
+			ret,
+			image.Rect(pt.X*mul+2, pt.Y*mul+2, (pt.X+1)*mul-2, (pt.Y+1)*mul-2),
+			image.NewUniform(red),
+			image.ZP,
+			draw.Src,
+		)
+	}
 	return ret
 }
