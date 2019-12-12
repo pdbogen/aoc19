@@ -96,7 +96,7 @@ loop:
 	log.Printf("Bounds %v - %v", min, max)
 	log.Printf("# points: %d", len(hull))
 
-	img := image.NewRGBA(image.Rect(0, 0, max.X*10, max.Y*10))
+	img := image.NewRGBA(image.Rect(0, 0, max.X*10+10, max.Y*10+10))
 	draw.Draw(img, img.Bounds(), image.Black, image.ZP, draw.Src)
 	for pt, color := range hull {
 		if color == white {
@@ -105,4 +105,5 @@ loop:
 	}
 	f, _ := os.OpenFile("output.png", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(0644))
 	png.Encode(f, img)
+	f.Close()
 }
