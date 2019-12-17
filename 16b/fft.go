@@ -47,16 +47,16 @@ func FFTdigit(in []int, n int, pass int) (out int) {
 			// handle n+1 numbers with mult -p
 			// skip i numbers
 			for span := 0; span < n+1; span++ {
-				if idx+span >= len(in) {
+				if positive {
+					out += FFTdigit(in, idx, pass-1)
+				} else {
+					out -= FFTdigit(in, idx, pass-1)
+				}
+				idx++
+				if idx >= len(in) {
 					break outer
 				}
-				if positive {
-					out += FFTdigit(in, idx+span, pass-1)
-				} else {
-					out -= FFTdigit(in, idx+span, pass-1)
-				}
 			}
-			idx += n + 1
 			positive = !positive
 			idx += n + 1 // skip n+1
 		}
@@ -97,8 +97,6 @@ func Decode(signal []int) []int {
 }
 
 func main() {
-	//fmt.Print(FFTdigit([]int{1, 2, 3, 4, 5, 6, 7, 8}, 1, 0))
-	//fmt.Print(FFTdigit([]int{1, 2, 3, 4, 5, 6, 7, 8}, 1, 1))
 	signalBytes, err := ioutil.ReadFile("input")
 	if err != nil {
 		log.Fatalf("reading signal from \"input\": %v", err)
