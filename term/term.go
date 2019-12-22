@@ -7,7 +7,7 @@ func Clear() {
 }
 
 func MoveCursor(x, y int) {
-	print("\x1b[", x, ";", y, "H")
+	print("\x1b[", y, ";", x, "H")
 }
 
 func HideCursor() {
