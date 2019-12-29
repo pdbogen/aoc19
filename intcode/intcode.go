@@ -107,12 +107,15 @@ func (c Computer) Compare(ptr int, comparison func(i, j int) bool) (out []int, o
 }
 
 // Input takes one argument, the address where we'll save the read-in value.
-func (c Computer) Input(ptr int, inChan <-chan int) (out []int, outPtr int, err error) {
+func (c Computer) Input(ptr int, inChan <-chan int, requestInput chan<- struct{}) (out []int, outPtr int, err error) {
 	op, err := c.ReadOp(ptr, 1)
 	if err != nil {
 		return nil, 0, err
 	}
 
+	if requestInput != nil {
+		requestInput <- struct{}{}
+	}
 	inputInt := <-inChan
 	dest := op.Address[0]
 	outPtr = ptr + 2
@@ -184,7 +187,12 @@ func (c *Computer) SetRelativeBase(ptr int) (out []int, outPtr int, err error) {
 }
 
 func Execute(in []int, input <-chan int, output chan<- int) (out []int, err error) {
-	c := Computer{Program: in}
+	return ExecuteInteractive(in, input, nil, output)
+}
+
+func ExecuteInteractive(in []int, input <-chan int, requestInput chan<- struct{}, output chan<- int) (out []int, err error) {
+	c := new(Computer)
+	c.Program = in
 
 	if output != nil {
 		defer close(output)
@@ -202,7 +210,7 @@ execution:
 		case OpMul:
 			newProg, newPtr, err = c.BinaryMath(OpMul, ptr, func(a int, b int) int { return a * b })
 		case OpInput:
-			newProg, newPtr, err = c.Input(ptr, input)
+			newProg, newPtr, err = c.Input(ptr, input, requestInput)
 		case OpOutput:
 			newProg, newPtr, err = c.Output(ptr, output)
 		case OpJumpTrue:
