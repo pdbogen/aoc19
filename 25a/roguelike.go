@@ -36,3 +36,21 @@ func main() {
 		inCh <- 10
 	}
 }
+
+/*
+Security  --  Engirng    Storage
+                 |         |
+              Gift  ----  Crew  -----------------------------  Observa  -- Holodeck
+              Wrap        Qtrs                                  -tory
+                 |                                                |
+                 |     Warp                                       |
+                 |     Drive  --  Sick Bay    --  Stables         |
+                 |                                  |             |
+                 |                                  |             |
+                 |                 Hallway*         |             |
+                 |                    |             |             |
+Hot Choc  --  Kitchen             Navigation      Hull          Escape
+Fountain                              |      ---  Breach  ----  Pod      -- Passages
+                                      |
+                                    Arcade  ----  Corridor
+ */
